@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#f5f5f7" />
+<link rel="manifest" href="manifest.webmanifest" />
+<link rel="apple-touch-icon" href="icon-192.png" />
+<title>Seizure Timer</title>
+<style>
+  :root { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh;
+    padding: max(24px, env(safe-area-inset-top)) max(24px, env(safe-area-inset-right))
+             max(24px, env(safe-area-inset-bottom)) max(24px, env(safe-area-inset-left));
+    background: #f5f5f7; color: #111;
+  }
+  .wrap { max-width: 760px; margin: 0 auto; }
+  h1 { font-size: clamp(30px, 5vw, 44px); margin: 0 0 16px; }
+  .status { font-size: clamp(20px, 3vw, 28px); margin-bottom: 10px; }
+  .time { font-size: clamp(52px, 11vw, 88px); font-weight: 750; margin: 6px 0 22px; letter-spacing: -0.03em; }
+  button {
+    width: 100%; min-height: clamp(82px, 12vw, 110px);
+    font-size: clamp(26px, 4.5vw, 38px); font-weight: 750;
+    border: 0; border-radius: 20px; margin: 10px 0; touch-action: manipulation;
+  }
+  #mainBtn { background: #ff3b30; color: white; }
+  #medBtn { background: #34c759; color: white; }
+  .card { background: white; border-radius: 20px; padding: 20px; margin-top: 18px; box-shadow: 0 2px 12px rgba(0,0,0,.08); }
+  .row { font-size: clamp(18px, 3vw, 24px); margin: 8px 0; line-height: 1.35; }
+  .muted { color: #666; }
+  @media (orientation: landscape) and (max-height: 700px) {
+    body { padding-top: 16px; padding-bottom: 16px; }
+    .time { margin-bottom: 12px; }
+    button { min-height: 70px; margin: 7px 0; }
+    .card { margin-top: 12px; padding: 16px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Seizure Timer</h1>
+  <div class="status" id="status">Ready</div>
+  <div class="time" id="elapsed">00:00</div>
+
+  <button id="mainBtn">START / END</button>
+  <button id="medBtn">MEDICATION</button>
+
+  <div class="card">
+    <div class="row"><strong>Start:</strong> <span id="startOut">—</span></div>
+    <div class="row"><strong>End:</strong> <span id="endOut">—</span></div>
+    <div class="row"><strong>Duration:</strong> <span id="durationOut">—</span></div>
+    <div class="row"><strong>Medication:</strong></div>
+    <div id="medList" class="row muted">None recorded</div>
+  </div>
+</div>
+
+<script>
+const STORAGE_KEY = 'seizureTimerStateV2';
+let running = false, startTime = null, endTime = null, meds = [], timerId = null;
+
+function fmt(d) {
+  return d.toLocaleTimeString('en-AU', {hour:'numeric', minute:'2-digit', second:'2-digit'});
+}
+function saveState() {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify({
+    running,
+    startTime: startTime ? startTime.toISOString() : null,
+    endTime: endTime ? endTime.toISOString() : null,
+    meds: meds.map(d => d.toISOString())
+  }));
+}
+function loadState() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return;
+    const s = JSON.parse(raw);
+    running = !!s.running;
+    startTime = s.startTime ? new Date(s.startTime) : null;
+    endTime = s.endTime ? new Date(s.endTime) : null;
+    meds = Array.isArray(s.meds) ? s.meds.map(x => new Date(x)) : [];
+  } catch (_) {}
+}
+function elapsedSeconds() {
+  if (!startTime) return 0;
+  const end = running ? new Date() : (endTime || new Date());
+  return Math.max(0, Math.floor((end.getTime() - startTime.getTime()) / 1000));
+}
+function updateElapsed() {
+  const sec = elapsedSeconds();
+  const m = Math.floor(sec / 60).toString().padStart(2,'0');
+  const s = (sec % 60).toString().padStart(2,'0');
+  document.getElementById('elapsed').textContent = `${m}:${s}`;
+}
+function renderMeds() {
+  const el = document.getElementById('medList');
+  if (!meds.length) {
+    el.textContent = 'None recorded'; el.className = 'row muted'; return;
+  }
+  el.className = 'row';
+  el.innerHTML = meds.map((d,i)=>`Medication ${i+1}: ${fmt(d)}`).join('<br>');
+}
+function render() {
+  document.getElementById('status').textContent = running ? 'Running' : (startTime && endTime ? 'Stopped' : 'Ready');
+  document.getElementById('startOut').textContent = startTime ? fmt(startTime) : '—';
+  document.getElementById('endOut').textContent = endTime ? fmt(endTime) : '—';
+  document.getElementById('durationOut').textContent = (startTime && endTime) ? `${elapsedSeconds()} sec` : '—';
+  renderMeds(); updateElapsed();
+}
+function startTicker() {
+  if (timerId) clearInterval(timerId);
+  timerId = running ? setInterval(updateElapsed, 250) : null;
+}
+document.getElementById('mainBtn').addEventListener('click', () => {
+  if (!running) {
+    running = true; startTime = new Date(); endTime = null; meds = [];
+    saveState(); render(); startTicker();
+  } else {
+    endTime = new Date(); running = false;
+    if (timerId) clearInterval(timerId); timerId = null;
+    saveState(); render();
+  }
+});
+document.getElementById('medBtn').addEventListener('click', () => {
+  if (!running) return;
+  meds.push(new Date()); saveState(); renderMeds();
+});
+loadState(); render(); startTicker();
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) { loadState(); render(); startTicker(); }
+});
+window.addEventListener('pageshow', () => { loadState(); render(); startTicker(); });
+
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => navigator.serviceWorker.register('./service-worker.js'));
+}
+</script>
+</body>
+</html>
